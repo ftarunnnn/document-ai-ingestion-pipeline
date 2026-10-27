@@ -10,6 +10,10 @@ from fastapi.responses import JSONResponse
 from app.api.upload import router as upload_router
 from app.api.documents import router as documents_router
 from app.config import settings
+from app.database.connection import init_db
+
+# Initialize database schema
+init_db()
 
 app = FastAPI(
     title=settings.APP_NAME,
