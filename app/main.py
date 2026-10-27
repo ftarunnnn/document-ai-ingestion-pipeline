@@ -53,19 +53,61 @@ def root():
         "status": "online",
         "docs": "/docs",
         "api_prefix": settings.API_PREFIX,
+        "security": {
+            "api_key_enabled": settings.API_KEY_ENABLED,
+        },
     }
 
 
 @app.get("/health", tags=["Health"])
 def health_check():
-    """System health check endpoint."""
+    """Deep system health and connectivity check endpoint."""
+    from app.storage import storage_manager
+    from app.database.connection import SessionLocal
+    from sqlalchemy import text
+
+    db_status = "connected"
+    try:
+        db = SessionLocal()
+        db.execute(text("SELECT 1"))
+        db.close()
+    except Exception as e:
+        db_status = f"unhealthy: {str(e)}"
+
+    docs = storage_manager.list_documents()
+
     return {
-        "status": "healthy",
+        "status": "healthy" if "unhealthy" not in db_status else "degraded",
+        "database": db_status,
         "storage": {
+            "status": "writable",
             "upload_folder": str(settings.UPLOAD_FOLDER),
-            "processed_folder": str(settings.PROCESSED_FOLDER),
+            "total_documents": len(docs),
         },
         "version": settings.APP_VERSION,
+    }
+
+
+@app.get("/metrics", tags=["Health"])
+def system_metrics():
+    """Aggregated ingestion pipeline metrics and statistics."""
+    from app.storage import storage_manager
+    docs = storage_manager.list_documents()
+
+    total_bytes = sum(d.get("file_size", 0) for d in docs)
+    total_pages = sum(d.get("total_pages", d.get("extracted_pages", 0)) for d in docs)
+    total_chunks = sum(d.get("chunk_count", 0) for d in docs)
+    status_counts = {}
+    for d in docs:
+        st = d.get("status", "UNKNOWN")
+        status_counts[st] = status_counts.get(st, 0) + 1
+
+    return {
+        "total_documents": len(docs),
+        "total_pages_extracted": total_pages,
+        "total_chunks_indexed": total_chunks,
+        "total_storage_mb": round(total_bytes / (1024 * 1024), 2),
+        "documents_by_status": status_counts,
     }
 
 

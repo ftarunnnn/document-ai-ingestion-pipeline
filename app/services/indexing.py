@@ -25,23 +25,32 @@ class IndexingService:
         doc_meta: Dict[str, Any],
         db: Session,
     ) -> Document:
-        """Persists or updates core document catalog record."""
-        doc = db.query(Document).filter(Document.id == doc_meta["document_id"]).first()
+        """Persists or updates core document catalog record with upsert behavior."""
+        doc_id = doc_meta["document_id"]
+        doc_hash = doc_meta.get("sha256_hash", "")
+
+        # Find existing by ID or Hash
+        doc = db.query(Document).filter(
+            (Document.id == doc_id) | (Document.sha256_hash == doc_hash)
+        ).first()
+
         if not doc:
             doc = Document(
-                id=doc_meta["document_id"],
+                id=doc_id,
                 filename=doc_meta.get("original_filename") or doc_meta.get("filename", ""),
                 file_type=doc_meta.get("extension", "").lstrip(".") or doc_meta.get("file_type", ""),
                 file_size_bytes=doc_meta.get("file_size", 0),
-                sha256_hash=doc_meta.get("sha256_hash", ""),
+                sha256_hash=doc_hash,
                 storage_path=doc_meta.get("stored_path", ""),
                 status=doc_meta.get("status", "UPLOADED"),
                 total_pages=doc_meta.get("extracted_pages", 0),
             )
             db.add(doc)
         else:
+            doc.id = doc_id
             doc.status = doc_meta.get("status", doc.status)
             doc.total_pages = doc_meta.get("extracted_pages", doc.total_pages)
+            doc.storage_path = doc_meta.get("stored_path", doc.storage_path)
 
         db.commit()
         db.refresh(doc)

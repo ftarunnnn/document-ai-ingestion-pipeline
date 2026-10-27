@@ -1,0 +1,99 @@
+version: '3.8'
+
+services:
+  # 1. PostgreSQL with pgvector extension
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: docai-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: document_ai
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./app/database/schema_pgvector.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d document_ai"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 2. Redis Message Broker for Celery
+  redis:
+    image: redis:7-alpine
+    container_name: docai-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 3. FastAPI Backend REST API
+  api:
+    build: .
+    container_name: docai-api
+    restart: unless-stopped
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgrespassword@postgres:5432/document_ai
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - API_KEY_ENABLED=false
+    volumes:
+      - docai_data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # 4. Celery Asynchronous Pipeline Worker
+  worker:
+    build: .
+    container_name: docai-worker
+    restart: unless-stopped
+    command: ["celery", "-A", "app.workers.tasks.celery_app", "worker", "--loglevel=info", "--concurrency=4"]
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgrespassword@postgres:5432/document_ai
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+    volumes:
+      - docai_data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # 5. Streamlit Interactive Dashboard
+  frontend:
+    build: .
+    container_name: docai-frontend
+    restart: unless-stopped
+    command: ["streamlit", "run", "frontend/dashboard.py", "--server.port=8501", "--server.address=0.0.0.0"]
+    ports:
+      - "8501:8501"
+    environment:
+      - API_BASE_URL=http://api:8000/api/v1
+      - DATABASE_URL=postgresql://postgres:postgrespassword@postgres:5432/document_ai
+    volumes:
+      - docai_data:/app/data
+    depends_on:
+      - api
+
+volumes:
+  pgdata:
+  redisdata:
+  docai_data:
