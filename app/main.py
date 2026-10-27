@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.upload import router as upload_router
+from app.api.documents import router as documents_router
 from app.config import settings
 
 app = FastAPI(
@@ -33,6 +34,7 @@ app.add_middleware(
 
 # Include Routers
 app.include_router(upload_router, prefix=settings.API_PREFIX)
+app.include_router(documents_router, prefix=settings.API_PREFIX)
 
 
 @app.get("/", tags=["Health"])

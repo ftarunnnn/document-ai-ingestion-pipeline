@@ -1,0 +1,101 @@
+"""
+Document Parsing and Extraction API Endpoints.
+Allows triggering parsing on uploaded files and inspecting structured output.
+"""
+
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+from fastapi import APIRouter, HTTPException, status
+from pydantic import BaseModel
+
+from app.ingestion.parser import document_parser
+from app.storage import storage_manager
+
+router = APIRouter(prefix="/documents", tags=["Parsing & Content"])
+
+
+class ParseResponse(BaseModel):
+    document_id: str
+    filename: str
+    total_pages: int
+    extraction_method: str
+    errors: List[str]
+    warnings: List[str]
+    pages: List[Dict[str, Any]]
+
+
+@router.post("/{doc_id}/parse", response_model=ParseResponse)
+def parse_document(doc_id: str):
+    """
+    Parses a previously uploaded document by extracting its text, tables,
+    and metadata page by page, executing OCR if needed.
+    """
+    doc = storage_manager.get_document(doc_id)
+    if not doc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Document '{doc_id}' not found.",
+        )
+
+    file_path = Path(doc["stored_path"])
+    if not file_path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Stored file for document '{doc_id}' does not exist on disk.",
+        )
+
+    try:
+        parsed = document_parser.parse(file_path, document_id=doc_id)
+        parsed_dict = parsed.to_dict()
+
+        # Update storage record with extraction results
+        storage_manager.update_document(
+            doc_id,
+            {
+                "status": "PARSED",
+                "extracted_pages": parsed.total_pages,
+                "parsed_content": parsed_dict,
+                "extraction_method": parsed.extraction_method,
+            },
+        )
+
+        return ParseResponse(
+            document_id=parsed.document_id,
+            filename=parsed.filename,
+            total_pages=parsed.total_pages,
+            extraction_method=parsed.extraction_method,
+            errors=parsed.errors,
+            warnings=parsed.warnings,
+            pages=parsed_dict["pages"],
+        )
+    except Exception as e:
+        storage_manager.update_document(
+            doc_id,
+            {
+                "status": "FAILED_PARSING",
+                "error": str(e),
+            },
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to parse document: {str(e)}",
+        )
+
+
+@router.get("/{doc_id}/content")
+def get_parsed_content(doc_id: str):
+    """Retrieves previously extracted page text, tables, and OCR info."""
+    doc = storage_manager.get_document(doc_id)
+    if not doc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Document '{doc_id}' not found.",
+        )
+
+    parsed = doc.get("parsed_content")
+    if not parsed:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Document '{doc_id}' has not been parsed yet. Call POST /documents/{doc_id}/parse first.",
+        )
+    return parsed
