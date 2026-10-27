@@ -163,3 +163,74 @@ def get_cleaned_content(doc_id: str):
             detail=f"Document '{doc_id}' has not been cleaned yet. Call POST /documents/{doc_id}/clean first.",
         )
     return cleaned
+
+
+@router.post("/{doc_id}/chunk")
+def chunk_document_endpoint(
+    doc_id: str,
+    chunk_size: Optional[int] = None,
+    chunk_overlap: Optional[int] = None,
+):
+    """
+    Chunks a cleaned document into section-aware searchable passages with
+    table protection and source attribution.
+    """
+    from app.ingestion.chunker import IntelligentChunker, document_chunker
+
+    doc = storage_manager.get_document(doc_id)
+    if not doc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Document '{doc_id}' not found.",
+        )
+
+    cleaned = doc.get("cleaned_content")
+    if not cleaned:
+        # Trigger clean first if needed
+        clean_res = clean_document_endpoint(doc_id)
+        cleaned = clean_res
+
+    chunker = (
+        IntelligentChunker(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+        if (chunk_size or chunk_overlap)
+        else document_chunker
+    )
+
+    chunks = chunker.chunk_document(cleaned)
+    chunks_dicts = [c.to_dict() for c in chunks]
+
+    storage_manager.update_document(
+        doc_id,
+        {
+            "status": "CHUNKED",
+            "chunk_count": len(chunks_dicts),
+            "chunks": chunks_dicts,
+        },
+    )
+
+    return {
+        "document_id": doc_id,
+        "status": "CHUNKED",
+        "total_chunks": len(chunks_dicts),
+        "chunks": chunks_dicts,
+    }
+
+
+@router.get("/{doc_id}/chunks")
+def get_document_chunks(doc_id: str):
+    """Retrieves all generated chunks for a document."""
+    doc = storage_manager.get_document(doc_id)
+    if not doc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Document '{doc_id}' not found.",
+        )
+
+    chunks = doc.get("chunks")
+    if not chunks:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Document '{doc_id}' has not been chunked yet. Call POST /documents/{doc_id}/chunk first.",
+        )
+    return {"document_id": doc_id, "total_chunks": len(chunks), "chunks": chunks}
+
