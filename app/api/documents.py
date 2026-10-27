@@ -234,3 +234,46 @@ def get_document_chunks(doc_id: str):
         )
     return {"document_id": doc_id, "total_chunks": len(chunks), "chunks": chunks}
 
+
+@router.post("/{doc_id}/embed")
+def embed_document_endpoint(doc_id: str, batch_size: int = 32):
+    """
+    Generates dense vector embeddings for all chunks in the document.
+    Reuses cached embeddings for identical content hashes.
+    """
+    from app.ingestion.embeddings import embedding_generator
+
+    doc = storage_manager.get_document(doc_id)
+    if not doc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Document '{doc_id}' not found.",
+        )
+
+    chunks = doc.get("chunks")
+    if not chunks:
+        # Trigger chunk first if needed
+        chunk_res = chunk_document_endpoint(doc_id)
+        chunks = chunk_res["chunks"]
+
+    embedded_chunks = embedding_generator.embed_document_chunks(chunks, batch_size=batch_size)
+
+    storage_manager.update_document(
+        doc_id,
+        {
+            "status": "EMBEDDED",
+            "chunks": embedded_chunks,
+            "embedding_model": embedding_generator.model_name,
+            "embedding_dimension": embedding_generator.dimension,
+        },
+    )
+
+    return {
+        "document_id": doc_id,
+        "status": "EMBEDDED",
+        "total_chunks_embedded": len(embedded_chunks),
+        "model": embedding_generator.model_name,
+        "dimension": embedding_generator.dimension,
+    }
+
+
