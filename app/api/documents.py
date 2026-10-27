@@ -99,3 +99,67 @@ def get_parsed_content(doc_id: str):
             detail=f"Document '{doc_id}' has not been parsed yet. Call POST /documents/{doc_id}/parse first.",
         )
     return parsed
+
+
+@router.post("/{doc_id}/clean")
+def clean_document_endpoint(doc_id: str):
+    """
+    Cleans previously parsed document: normalizes Unicode, strips recurring headers/footers,
+    removes noise, preserves tables, and evaluates quality scores.
+    """
+    from app.ingestion.cleaner import text_cleaner
+
+    doc = storage_manager.get_document(doc_id)
+    if not doc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Document '{doc_id}' not found.",
+        )
+
+    parsed = doc.get("parsed_content")
+    if not parsed:
+        # If not yet parsed, parse first
+        file_path = Path(doc["stored_path"])
+        parsed_doc = document_parser.parse(file_path, document_id=doc_id)
+        parsed = parsed_doc.to_dict()
+        storage_manager.update_document(doc_id, {"parsed_content": parsed, "status": "PARSED"})
+
+    cleaned = text_cleaner.clean_document_dict(parsed)
+    cleaned_dict = cleaned.to_dict()
+
+    storage_manager.update_document(
+        doc_id,
+        {
+            "status": "CLEANED",
+            "cleaned_content": cleaned_dict,
+            "overall_quality": cleaned_dict["overall_quality"],
+        },
+    )
+
+    return {
+        "document_id": doc_id,
+        "status": "CLEANED",
+        "total_pages": cleaned.total_pages,
+        "overall_quality": cleaned_dict["overall_quality"],
+        "removed_headers_footers": cleaned_dict["removed_headers_footers"],
+        "pages": cleaned_dict["pages"],
+    }
+
+
+@router.get("/{doc_id}/cleaned")
+def get_cleaned_content(doc_id: str):
+    """Retrieves cleaned text and quality metrics for a document."""
+    doc = storage_manager.get_document(doc_id)
+    if not doc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Document '{doc_id}' not found.",
+        )
+
+    cleaned = doc.get("cleaned_content")
+    if not cleaned:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Document '{doc_id}' has not been cleaned yet. Call POST /documents/{doc_id}/clean first.",
+        )
+    return cleaned
