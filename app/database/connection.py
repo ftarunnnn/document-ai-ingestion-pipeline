@@ -36,6 +36,9 @@ def init_db() -> None:
         logger.error(f"Failed to initialize database: {e}")
         raise
 
+# Auto-ensure tables exist upon engine creation
+init_db()
+
 
 def get_db() -> Generator[Session, None, None]:
     """FastAPI Dependency for database session scope."""
