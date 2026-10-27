@@ -1,0 +1,3 @@
+"""
+Frontend dashboard package.
+"""
