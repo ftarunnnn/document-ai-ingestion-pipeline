@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 from app.api.upload import router as upload_router
 from app.api.documents import router as documents_router
 from app.api.pipeline import router as pipeline_router
+from app.api.search import router as search_router
 from app.config import settings
 from app.database.connection import init_db
 
@@ -41,6 +42,7 @@ app.add_middleware(
 app.include_router(upload_router, prefix=settings.API_PREFIX)
 app.include_router(documents_router, prefix=settings.API_PREFIX)
 app.include_router(pipeline_router, prefix=settings.API_PREFIX)
+app.include_router(search_router, prefix=settings.API_PREFIX)
 
 
 @app.get("/", tags=["Health"])

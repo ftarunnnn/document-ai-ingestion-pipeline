@@ -216,7 +216,69 @@ elif mode == "⚙️ Pipeline Status":
 
 # View 4: Search & Q&A
 elif mode == "🔍 Search & RAG Q&A":
-    st.header("Semantic Search & Source-Grounded Q&A")
-    query = st.text_input("Ask a question about your ingested documents:")
-    if query:
-        st.info("Semantic Search & RAG engine will be active in Phase 8.")
+    st.header("Semantic & Hybrid Retrieval with Grounded RAG")
+    st.write(
+        "Search across all indexed documents using semantic dense vectors, "
+        "lexical keywords, or Reciprocal Rank Fusion (RRF). Answers are cited directly to source pages."
+    )
+
+    from app.services.retrieval import retrieval_service
+
+    tab1, tab2 = st.tabs(["🤖 AI Question Answering (RAG)", "🔎 Passage Search"])
+
+    with tab1:
+        st.subheader("Ask Questions Grounded in Your Documents")
+        question = st.text_input(
+            "Enter your question:",
+            placeholder="e.g., What are the key financial performance metrics mentioned in the quarterly report?",
+        )
+        col_q1, col_q2 = st.columns([1, 4])
+        with col_q1:
+            top_k_passages = st.slider("Context Passages", min_value=1, max_value=8, value=3)
+
+        if st.button("💡 Synthesize Answer", type="primary", disabled=not question):
+            with st.spinner("Retrieving relevant passages and synthesizing factual answer..."):
+                rag_res = retrieval_service.generate_rag_answer(question, top_k=top_k_passages)
+
+                st.markdown("### Answer")
+                st.info(rag_res["answer"])
+                st.caption(f"Confidence score: {rag_res['confidence'] * 100:.0f}%")
+
+                st.markdown("### Source Citations")
+                for cite in rag_res["citations"]:
+                    st.markdown(
+                        f"""
+                        <div class="metric-card">
+                            <b>[{cite['citation_index']}] {cite['filename']} (Page {cite['page_number']})</b> — <i>Section: {cite['section']}</i><br/>
+                            <p style="font-size:0.9rem; color:#d0d7de; margin-top:5px;">"{cite['text_snippet']}"</p>
+                            <span style="font-size:0.75rem; color:#8b949e;">Relevance: {cite['relevance_score']}</span>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+
+    with tab2:
+        st.subheader("Direct Passage Search")
+        search_query = st.text_input("Search keywords or concepts:", key="passage_search")
+        search_mode = st.radio("Retrieval Mode", ["Hybrid (RRF)", "Semantic Vector", "Keyword (BM25)"], horizontal=True)
+
+        if st.button("🔍 Search Passages", disabled=not search_query):
+            if search_mode == "Semantic Vector":
+                results = retrieval_service.semantic_search(search_query, top_k=5)
+            elif search_mode == "Keyword (BM25)":
+                results = retrieval_service.keyword_search(search_query, top_k=5)
+            else:
+                results = retrieval_service.hybrid_search(search_query, top_k=5)
+
+            st.write(f"Found **{len(results)}** matching passages:")
+            for r in results:
+                with st.container():
+                    st.markdown(
+                        f"""
+                        <div class="metric-card">
+                            <b>{r.citation}</b> — Mode: <code>{r.retrieval_mode}</code> | Score: <b>{r.score}</b><br/>
+                            <p style="margin-top:8px;">{r.text}</p>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
